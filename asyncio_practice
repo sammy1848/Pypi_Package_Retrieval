@@ -1,33 +1,42 @@
 import aiohttp
 import asyncio
 import json
-import os
 import time
-from bs4 import BeautifulSoup
+import os
 from packageurl import PackageURL
-from aiohttp import ClientTimeout
+from bs4 import BeautifulSoup
 
-sem = asyncio.Semaphore(50)
+
+
 
 async def fetch(session, url):
-    async with sem, session.get(url) as response:
-        await asyncio.sleep(1)  # add delay
+    async with session.get(url) as response:
         return await response.text()
 
-async def get_package_info(session, package_name):
-    base_url = f"https://pypi.org/project/{package_name}"
-    json_url = f"https://pypi.org/pypi/{package_name}/json"
 
-    # Fetch JSON data
-    async with sem, session.get(json_url) as response:
-        await asyncio.sleep(0.1)  # add delay
+
+
+async def fetch_all(session, urls):
+    results = await asyncio.gather(
+        *[fetch(session, url) for url in urls], return_exceptions=True
+    )
+    return results
+
+
+
+
+async def get_package_info(session, package_name):
+    url = f"https://pypi.org/pypi/{package_name}/json"
+    async with session.get(url) as response:
         if response.status != 200:
             print(
                 f"Failed to get info for package {package_name}: HTTP {response.status}"
             )
             return None
 
+
         data = await response.json()
+
 
         if "info" not in data:
             print(
@@ -35,66 +44,53 @@ async def get_package_info(session, package_name):
             )
             return None
 
-    # Fetch HTML page
-    async with sem, session.get(base_url) as response:
-        await asyncio.sleep(0.1)  # add delay
-        if response.status != 200:
-            print(
-                f"Failed to get page for package {package_name}: HTTP {response.status}"
-            )
-            return None
+        purl = PackageURL(type='pypi', name=package_name).to_string()
+        info = data["info"]
+        project_urls = info.get("project_urls")
+        source_repository = (
+            project_urls.get("Homepage") if project_urls is not None else None
+        )
+        return {
+            "name": info.get("name"),
+            "version": info.get("version"),
+            "source_repository": source_repository,
+            "author": info.get("author"),
+            "author_email": info.get("author_email"),
+            "license": info.get("license"),
+            "purl": purl,
+        }
 
-        html = await response.text()
-        soup = BeautifulSoup(html, "html.parser")
-        meta = soup.find_all('p', class_="package-header__meta")
 
-        keywords = [keyword.text for keyword in meta]
 
-    # Generate package url
-    purl = PackageURL(type='pypi', name=package_name).to_string()
-
-    info = data["info"]
-    project_urls = info.get("project_urls")
-    source_repository = (
-        project_urls.get("Homepage") if project_urls is not None else None
-    )
-    return {
-        "name": info.get("name"),
-        "version": info.get("version"),
-        "source_repository": source_repository,
-        "author": info.get("author"),
-        "author_email": info.get("author_email"),
-        "license": info.get("license"),
-        "package_url": purl,
-        "keywords": keywords
-    }
 
 async def main():
     output_dir = "C:\\Users\\Sameer Bhagavatula\\Documents\\VS Code\\Securin Intership\\ASYNCIO PRACTICE FILES\\"
-
     url = "https://pypi.org/simple/"
     failed_packages = []
-    timeout = ClientTimeout(total=60)  # Set a 60 second timeout
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    async with aiohttp.ClientSession() as session:
         html = await fetch(session, url)
         soup = BeautifulSoup(html, "html.parser")
         package_links = [link.get("href") for link in soup.find_all("a")]
         package_names = [link.split("/")[-2] for link in package_links]
 
+
         package_infos = await asyncio.gather(
             *[get_package_info(session, package_name) for package_name in package_names]
         )
 
+
         for package_name, package_info in zip(package_names, package_infos):
             if package_info is not None:
-                file_path = os.path.join(output_dir, f"{package_info['name']}.json")
-                with open(file_path, "w") as f:
+                with open(f"{package_info['name']}.json", "w") as f:
                     json.dump(package_info, f)
             else:
                 failed_packages.append(package_name)
 
-        with open(os.path.join(output_dir, "failed_packages.json"), "w") as f:
+
+        with open("failed_packages.json", "w") as f:
             json.dump(failed_packages, f)
+
+
 
 
 if __name__ == "__main__":

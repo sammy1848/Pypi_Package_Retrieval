@@ -1,0 +1,56 @@
+import os
+import json
+import pandas as pd
+import re
+
+def sanitize_df(df):
+    # compile regex for illegal characters
+    illegal_characters_re = re.compile(r'[\000-\010]|[\013-\014]|[\016-\037]')
+
+    # iterate over columns and apply sanitize function
+    df = df.applymap(lambda x: re.sub(illegal_characters_re, '', str(x)) if isinstance(x, str) else x)
+
+    return df
+
+def json_to_excel(directory_path, excel_file_name):
+    files = [f for f in os.listdir(directory_path) if f.endswith(".json") and f != "failed_packages.json"]
+
+    excel_file_index = 1
+    excel_data_list = []
+
+    for file_name in files:
+        file_path = os.path.join(directory_path, file_name)
+        with open(file_path, "r") as f:
+            try:
+                data = json.load(f)
+                # Skip the package if there is no repository link
+                if not data.get('source_repository'):
+                    continue
+                
+                excel_data_list.append(data)
+
+                # Check if the Excel row limit is reached
+                if len(excel_data_list) >= 1_048_576:
+                    df = pd.DataFrame(excel_data_list)
+                    df = sanitize_df(df)  # sanitize data
+                    df.fillna("null", inplace=True)
+                    df.to_excel(f"{excel_file_name}_{excel_file_index}.xlsx", index=False)
+
+                    # Reset for the next file
+                    excel_file_index += 1
+                    excel_data_list = []
+            except json.JSONDecodeError:
+                print(f'Error decoding JSON from file {file_name}. File is empty or not properly formatted.')
+            except Exception as e:
+                print(f'Error processing file {file_name}: {e}')
+    
+    # Write remaining data to an Excel file
+    if excel_data_list:
+        df = pd.DataFrame(excel_data_list)
+        df = sanitize_df(df)  # sanitize data
+        df.fillna("null", inplace=True)
+        df.to_excel(f"{excel_file_name}_{excel_file_index}.xlsx", index=False)
+
+directory_path = "C:\\Users\\Sameer Bhagavatula\\Documents\\VS Code\\Securin Intership\\ASYNCIO PRACTICE FILES\\"
+excel_file_name = "package_info"
+json_to_excel(directory_path, excel_file_name)
